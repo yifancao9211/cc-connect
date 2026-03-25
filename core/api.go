@@ -57,6 +57,7 @@ func NewAPIServer(dataDir string) (*APIServer, error) {
 	}
 	s.mux.HandleFunc("/send", s.handleSend)
 	s.mux.HandleFunc("/sessions", s.handleSessions)
+	s.mux.HandleFunc("/submit-plan", s.handleSubmitPlan)
 	s.mux.HandleFunc("/cron/add", s.handleCronAdd)
 	s.mux.HandleFunc("/cron/list", s.handleCronList)
 	s.mux.HandleFunc("/cron/del", s.handleCronDel)
@@ -79,6 +80,9 @@ func (s *APIServer) RegisterEngine(name string, e *Engine) {
 		s.relay.RegisterEngine(name, e)
 	}
 }
+
+// RegisterApp is an alias for RegisterEngine for new code style.
+var RegisterApp = (*APIServer).RegisterEngine
 
 func (s *APIServer) SetRelayManager(rm *RelayManager) {
 	s.relay = rm
@@ -165,21 +169,72 @@ func (s *APIServer) handleSessions(w http.ResponseWriter, r *http.Request) {
 
 	var result []sessionInfo
 	for name, e := range s.engines {
-		e.interactiveMu.Lock()
-		for key, state := range e.interactiveStates {
-			if state.platform != nil {
+		for _, conv := range e.conversations.List() {
+			if conv.ReplyPlatform != nil {
 				result = append(result, sessionInfo{
 					Project:    name,
-					SessionKey: key,
-					Platform:   state.platform.Name(),
+					SessionKey: conv.Key,
+					Platform:   conv.ReplyPlatform.Name(),
 				})
 			}
 		}
-		e.interactiveMu.Unlock()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// ── Submit Plan API ────────────────────────────────────────────
+
+// SubmitPlanRequest is the JSON body for POST /submit-plan.
+type SubmitPlanRequest struct {
+	Project    string `json:"project"`
+	SessionKey string `json:"session_key"`
+	Plan       string `json:"plan"`
+}
+
+func (s *APIServer) handleSubmitPlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req SubmitPlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Plan == "" {
+		http.Error(w, "plan is required", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.RLock()
+	engine, ok := s.engines[req.Project]
+	s.mu.RUnlock()
+
+	if !ok {
+		s.mu.RLock()
+		if len(s.engines) == 1 {
+			for _, e := range s.engines {
+				engine = e
+				ok = true
+			}
+		}
+		s.mu.RUnlock()
+	}
+	if !ok {
+		http.Error(w, fmt.Sprintf("project %q not found", req.Project), http.StatusNotFound)
+		return
+	}
+
+	if err := engine.HandleSubmitPlan(req.SessionKey, req.Plan); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // ── Cron API ───────────────────────────────────────────────────

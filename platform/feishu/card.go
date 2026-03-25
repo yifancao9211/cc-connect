@@ -50,10 +50,11 @@ func (p *interactivePlatform) SendCard(ctx context.Context, rctx any, card *core
 	}
 
 	cardJSON := renderCard(card)
+	receiveIDType, receiveID := resolveReceiveID(rc.chatID)
 	resp, err := p.client.Im.Message.Create(ctx, larkim.NewCreateMessageReqBuilder().
-		ReceiveIdType(larkim.ReceiveIdTypeChatId).
+		ReceiveIdType(receiveIDType).
 		Body(larkim.NewCreateMessageReqBodyBuilder().
-			ReceiveId(rc.chatID).
+			ReceiveId(receiveID).
 			MsgType(larkim.MsgTypeInteractive).
 			Content(cardJSON).
 			Build()).

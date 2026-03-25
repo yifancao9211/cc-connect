@@ -606,7 +606,6 @@ func TestCmdList_MultiWorkspaceUsesWorkspaceSessions(t *testing.T) {
 			{ID: "w1", Summary: "Workspace One", MessageCount: 2},
 		},
 	}
-	ws.sessions = NewSessionManager("")
 
 	msg := &Message{SessionKey: "slack:" + channelID + ":U1", ReplyCtx: "ctx"}
 	e.cmdList(p, msg, nil)
@@ -636,12 +635,9 @@ func TestHandlePendingPermission_MultiWorkspaceLookup(t *testing.T) {
 	}
 	session := &recordingAgentSession{}
 
-	e.interactiveMu.Lock()
-	e.interactiveStates[interactiveKey] = &interactiveState{
-		agentSession: session,
-		pending:      pending,
-	}
-	e.interactiveMu.Unlock()
+	conv := e.conversations.GetOrCreate(interactiveKey)
+	conv.AgentSession = session
+	conv.PendingPerm = pending
 
 	p := &stubPlatformEngine{n: "test"}
 	msg := &Message{SessionKey: sessionKey, ReplyCtx: "ctx"}
@@ -650,15 +646,13 @@ func TestHandlePendingPermission_MultiWorkspaceLookup(t *testing.T) {
 		t.Fatal("expected pending permission to be handled")
 	}
 
-	e.interactiveMu.Lock()
-	state := e.interactiveStates[interactiveKey]
-	e.interactiveMu.Unlock()
-	if state == nil {
-		t.Fatal("expected interactive state to remain")
+	conv = e.conversations.Get(interactiveKey)
+	if conv == nil {
+		t.Fatal("expected conversation to remain")
 	}
-	state.mu.Lock()
-	hasPending := state.pending != nil
-	state.mu.Unlock()
+	conv.mu.Lock()
+	hasPending := conv.PendingPerm != nil
+	conv.mu.Unlock()
 	if hasPending {
 		t.Fatal("expected pending permission to be cleared")
 	}
@@ -690,25 +684,22 @@ func TestQuietSessionToggle(t *testing.T) {
 	// /quiet — per-session toggle on
 	e.cmdQuiet(p, msg, nil)
 
-	e.interactiveMu.Lock()
-	state := e.interactiveStates["test:user1"]
-	e.interactiveMu.Unlock()
-
-	if state == nil {
-		t.Fatal("expected interactiveState to be created")
+	conv := e.conversations.Get("test:user1")
+	if conv == nil {
+		t.Fatal("expected conversation to be created")
 	}
-	state.mu.Lock()
-	q := state.quiet
-	state.mu.Unlock()
+	conv.mu.Lock()
+	q := conv.Quiet
+	conv.mu.Unlock()
 	if !q {
 		t.Fatal("expected session quiet to be true")
 	}
 
 	// /quiet — per-session toggle off
 	e.cmdQuiet(p, msg, nil)
-	state.mu.Lock()
-	q = state.quiet
-	state.mu.Unlock()
+	conv.mu.Lock()
+	q = conv.Quiet
+	conv.mu.Unlock()
 	if q {
 		t.Fatal("expected session quiet to be false after second toggle")
 	}
@@ -723,14 +714,17 @@ func TestQuietSessionResetsOnNewSession(t *testing.T) {
 	e.cmdQuiet(p, msg, nil)
 
 	// Simulate /new
-	e.cleanupInteractiveState("test:user1")
+	e.cleanupConversation("test:user1")
 
-	// State should be gone, quiet resets
-	e.interactiveMu.Lock()
-	state := e.interactiveStates["test:user1"]
-	e.interactiveMu.Unlock()
-	if state != nil {
-		t.Fatal("expected interactiveState to be cleaned up")
+	// Runtime state should be cleared
+	conv := e.conversations.Get("test:user1")
+	if conv != nil {
+		conv.mu.Lock()
+		hasAgent := conv.AgentSession != nil
+		conv.mu.Unlock()
+		if hasAgent {
+			t.Fatal("expected agent session to be cleaned up")
+		}
 	}
 
 	// Global quiet should still be off
@@ -780,7 +774,7 @@ func TestQuietGlobalPersistsAcrossSessions(t *testing.T) {
 	e.cmdQuiet(p, msg, []string{"global"})
 
 	// Simulate /new
-	e.cleanupInteractiveState("test:user1")
+	e.cleanupConversation("test:user1")
 
 	// Global quiet should still be on
 	e.quietMu.RLock()
@@ -805,12 +799,15 @@ func TestQuietGlobalAndSessionCombined(t *testing.T) {
 		t.Fatal("expected global quiet on")
 	}
 
-	// Session quiet is off (no state yet) — global alone should be enough
-	e.interactiveMu.Lock()
-	state := e.interactiveStates["test:user1"]
-	e.interactiveMu.Unlock()
-	if state != nil {
-		t.Fatal("expected no session state yet")
+	// Session quiet is off (no conversation yet) — global alone should be enough
+	conv := e.conversations.Get("test:user1")
+	if conv != nil {
+		conv.mu.Lock()
+		sq := conv.Quiet
+		conv.mu.Unlock()
+		if sq {
+			t.Fatal("expected no session quiet yet")
+		}
 	}
 
 	// Turn off global, turn on session
@@ -824,12 +821,13 @@ func TestQuietGlobalAndSessionCombined(t *testing.T) {
 		t.Fatal("expected global quiet off")
 	}
 
-	e.interactiveMu.Lock()
-	state = e.interactiveStates["test:user1"]
-	e.interactiveMu.Unlock()
-	state.mu.Lock()
-	sq := state.quiet
-	state.mu.Unlock()
+	conv = e.conversations.Get("test:user1")
+	if conv == nil {
+		t.Fatal("expected conversation to exist")
+	}
+	conv.mu.Lock()
+	sq := conv.Quiet
+	conv.mu.Unlock()
 	if !sq {
 		t.Fatal("expected session quiet on")
 	}
@@ -906,10 +904,10 @@ func TestCmdCurrent_UsesLegacyTextOnPlatformWithoutCardSupport(t *testing.T) {
 	p := &stubPlatformEngine{n: "plain"}
 	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
 	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
-	session := e.sessions.GetOrCreateActive(msg.SessionKey)
-	session.Name = "Focus"
-	session.AgentSessionID = "session-123"
-	session.History = append(session.History, HistoryEntry{Role: "user", Content: "hello", Timestamp: time.Now()})
+	conv := e.conversations.GetOrCreate(msg.SessionKey)
+	conv.Name = "Focus"
+	conv.AgentSessionID = "session-123"
+	conv.AddHistory("user", "hello")
 
 	e.cmdCurrent(p, msg)
 
@@ -1243,7 +1241,7 @@ func TestDeleteMode_SubmitBlocksActiveSession(t *testing.T) {
 	}}}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
 	msg := &Message{SessionKey: "feishu:user1", ReplyCtx: "ctx"}
-	e.sessions.GetOrCreateActive(msg.SessionKey).AgentSessionID = "session-1"
+	e.conversations.GetOrCreate(msg.SessionKey).AgentSessionID = "session-1"
 
 	e.cmdDelete(p, msg, nil)
 	_ = e.handleCardNav("act:/delete-mode toggle session-1", msg.SessionKey)
@@ -1267,7 +1265,7 @@ func TestDeleteMode_ActiveSessionMarkedWithArrowAndNotSelectable(t *testing.T) {
 	}}}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
 	msg := &Message{SessionKey: "feishu:user1", ReplyCtx: "ctx"}
-	e.sessions.GetOrCreateActive(msg.SessionKey).AgentSessionID = "session-1"
+	e.conversations.GetOrCreate(msg.SessionKey).AgentSessionID = "session-1"
 
 	e.cmdDelete(p, msg, nil)
 	if len(p.repliedCards) != 1 {
@@ -1325,24 +1323,21 @@ func TestDeleteMode_FormSubmitShowsConfirmThenDeletes(t *testing.T) {
 
 func TestExecuteCardActionStop_PreservesQuietStateWithoutCleanupReinsert(t *testing.T) {
 	e := newTestEngine()
-	e.interactiveMu.Lock()
-	e.interactiveStates["test:user1"] = &interactiveState{quiet: true}
-	e.interactiveMu.Unlock()
+	conv := e.conversations.GetOrCreate("test:user1")
+	conv.Quiet = true
 
 	e.executeCardAction("/stop", "", "test:user1")
 
-	e.interactiveMu.Lock()
-	state := e.interactiveStates["test:user1"]
-	e.interactiveMu.Unlock()
-	if state == nil {
-		t.Fatal("expected interactive state to remain for quiet preservation")
+	conv = e.conversations.Get("test:user1")
+	if conv == nil {
+		t.Fatal("expected conversation to remain for quiet preservation")
 	}
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	if !state.quiet {
+	conv.mu.Lock()
+	defer conv.mu.Unlock()
+	if !conv.Quiet {
 		t.Fatal("expected quiet state to remain enabled")
 	}
-	if state.pending != nil {
+	if conv.PendingPerm != nil {
 		t.Fatal("expected pending permission to be cleared")
 	}
 }
@@ -1441,20 +1436,24 @@ func TestCmdReasoning_SwitchesEffortAndResetsSession(t *testing.T) {
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
 	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
 
-	s := e.sessions.GetOrCreateActive(msg.SessionKey)
-	s.AgentSessionID = "existing-session"
-	s.AddHistory("user", "hello")
+	conv := e.conversations.GetOrCreate(msg.SessionKey)
+	conv.AgentSessionID = "existing-session"
+	conv.AddHistory("user", "hello")
 
 	e.cmdReasoning(p, msg, []string{"3"})
 
 	if agent.reasoningEffort != "high" {
 		t.Fatalf("reasoning effort = %q, want high", agent.reasoningEffort)
 	}
-	if s.AgentSessionID != "" {
-		t.Fatalf("AgentSessionID = %q, want cleared", s.AgentSessionID)
+	conv.mu.Lock()
+	agentID := conv.AgentSessionID
+	histLen := len(conv.History)
+	conv.mu.Unlock()
+	if agentID != "" {
+		t.Fatalf("AgentSessionID = %q, want cleared", agentID)
 	}
-	if len(s.History) != 0 {
-		t.Fatalf("history length = %d, want 0", len(s.History))
+	if histLen != 0 {
+		t.Fatalf("history length = %d, want 0", histLen)
 	}
 	if len(p.sent) != 1 || !strings.Contains(p.sent[0], "Reasoning effort switched to `high`") {
 		t.Fatalf("sent = %v, want reasoning changed message", p.sent)
@@ -1769,7 +1768,7 @@ func TestRenderListCard_MakesEveryVisibleSessionClickable(t *testing.T) {
 	}
 
 	e := NewEngine("test", &stubListAgent{sessions: sessions}, []Platform{&stubPlatformEngine{n: "test"}}, "", LangEnglish)
-	e.sessions.GetOrCreateActive("test:user1").AgentSessionID = sessions[5].ID
+	e.conversations.GetOrCreate("test:user1").AgentSessionID = sessions[5].ID
 
 	card, err := e.renderListCard("test:user1", 1)
 	if err != nil {
@@ -1795,8 +1794,8 @@ func TestRenderHelpCard_DefaultsToSessionTab(t *testing.T) {
 	card := e.renderHelpCard()
 	text := card.RenderText()
 
-	if got := countCardActionValues(card, "nav:/help "); got != 4 {
-		t.Fatalf("help tab action count = %d, want 4", got)
+	if got := countCardActionValues(card, "nav:/help "); got != 5 {
+		t.Fatalf("help tab action count = %d, want 5 (4 tabs + 1 quick action)", got)
 	}
 	btn, ok := findCardAction(card, "nav:/help session")
 	if !ok {
@@ -2010,23 +2009,19 @@ func TestHandlePendingPermission_AskUserQuestion_SingleQuestion(t *testing.T) {
 	p := &stubPlatformEngine{n: "test"}
 	rec := &recordingAgentSession{}
 
-	state := &interactiveState{
-		agentSession: rec,
-		platform:     p,
-		replyCtx:     "ctx",
-		pending: &pendingPermission{
-			RequestID: "req-1",
-			ToolName:  "AskUserQuestion",
-			ToolInput: map[string]any{
-				"questions": []any{map[string]any{"question": "Which?"}},
-			},
-			Questions: testQuestions(),
-			Resolved:  make(chan struct{}),
+	conv := e.conversations.GetOrCreate("test:chat:user1")
+	conv.AgentSession = rec
+	conv.ReplyPlatform = p
+	conv.ReplyCtx = "ctx"
+	conv.PendingPerm = &pendingPermission{
+		RequestID: "req-1",
+		ToolName:  "AskUserQuestion",
+		ToolInput: map[string]any{
+			"questions": []any{map[string]any{"question": "Which?"}},
 		},
+		Questions: testQuestions(),
+		Resolved:  make(chan struct{}),
 	}
-	e.interactiveMu.Lock()
-	e.interactiveStates["test:chat:user1"] = state
-	e.interactiveMu.Unlock()
 
 	handled := e.handlePendingPermission(p, &Message{
 		SessionKey: "test:chat:user1",
@@ -2049,11 +2044,11 @@ func TestHandlePendingPermission_AskUserQuestion_SingleQuestion(t *testing.T) {
 		t.Errorf("expected answer=SQLite, got %v", answers["0"])
 	}
 
-	state.mu.Lock()
-	if state.pending != nil {
+	conv.mu.Lock()
+	if conv.PendingPerm != nil {
 		t.Error("expected pending to be cleared after response")
 	}
-	state.mu.Unlock()
+	conv.mu.Unlock()
 }
 
 func TestHandlePendingPermission_AskUserQuestion_MultiQuestion_Sequential(t *testing.T) {
@@ -2062,21 +2057,17 @@ func TestHandlePendingPermission_AskUserQuestion_MultiQuestion_Sequential(t *tes
 	rec := &recordingAgentSession{}
 
 	qs := testMultiQuestions()
-	state := &interactiveState{
-		agentSession: rec,
-		platform:     p,
-		replyCtx:     "ctx",
-		pending: &pendingPermission{
-			RequestID: "req-1",
-			ToolName:  "AskUserQuestion",
-			ToolInput: map[string]any{"questions": []any{}},
-			Questions: qs,
-			Resolved:  make(chan struct{}),
-		},
+	conv := e.conversations.GetOrCreate("test:chat:user1")
+	conv.AgentSession = rec
+	conv.ReplyPlatform = p
+	conv.ReplyCtx = "ctx"
+	conv.PendingPerm = &pendingPermission{
+		RequestID: "req-1",
+		ToolName:  "AskUserQuestion",
+		ToolInput: map[string]any{"questions": []any{}},
+		Questions: qs,
+		Resolved:  make(chan struct{}),
 	}
-	e.interactiveMu.Lock()
-	e.interactiveStates["test:chat:user1"] = state
-	e.interactiveMu.Unlock()
 
 	// Answer question 0 — should NOT resolve yet
 	handled := e.handlePendingPermission(p, &Message{
@@ -2091,14 +2082,14 @@ func TestHandlePendingPermission_AskUserQuestion_MultiQuestion_Sequential(t *tes
 	if rec.calls != 0 {
 		t.Fatalf("should not have called RespondPermission yet, got %d calls", rec.calls)
 	}
-	state.mu.Lock()
-	if state.pending == nil {
+	conv.mu.Lock()
+	if conv.PendingPerm == nil {
 		t.Fatal("pending should still exist (more questions)")
 	}
-	if state.pending.CurrentQuestion != 1 {
-		t.Errorf("expected CurrentQuestion=1, got %d", state.pending.CurrentQuestion)
+	if conv.PendingPerm.CurrentQuestion != 1 {
+		t.Errorf("expected CurrentQuestion=1, got %d", conv.PendingPerm.CurrentQuestion)
 	}
-	state.mu.Unlock()
+	conv.mu.Unlock()
 
 	// Answer question 1 — should resolve
 	handled = e.handlePendingPermission(p, &Message{
@@ -2124,11 +2115,11 @@ func TestHandlePendingPermission_AskUserQuestion_MultiQuestion_Sequential(t *tes
 		t.Errorf("expected answer[1]=Echo, got %v", answers["1"])
 	}
 
-	state.mu.Lock()
-	if state.pending != nil {
+	conv.mu.Lock()
+	if conv.PendingPerm != nil {
 		t.Error("expected pending to be cleared after all questions answered")
 	}
-	state.mu.Unlock()
+	conv.mu.Unlock()
 }
 
 func TestHandlePendingPermission_AskUserQuestion_SkipsPermFlow(t *testing.T) {
@@ -2136,23 +2127,19 @@ func TestHandlePendingPermission_AskUserQuestion_SkipsPermFlow(t *testing.T) {
 	p := &stubPlatformEngine{n: "test"}
 	rec := &recordingAgentSession{}
 
-	state := &interactiveState{
-		agentSession: rec,
-		platform:     p,
-		replyCtx:     "ctx",
-		pending: &pendingPermission{
-			RequestID: "req-1",
-			ToolName:  "AskUserQuestion",
-			ToolInput: map[string]any{
-				"questions": []any{map[string]any{"question": "Which?"}},
-			},
-			Questions: testQuestions(),
-			Resolved:  make(chan struct{}),
+	conv := e.conversations.GetOrCreate("test:chat:user1")
+	conv.AgentSession = rec
+	conv.ReplyPlatform = p
+	conv.ReplyCtx = "ctx"
+	conv.PendingPerm = &pendingPermission{
+		RequestID: "req-1",
+		ToolName:  "AskUserQuestion",
+		ToolInput: map[string]any{
+			"questions": []any{map[string]any{"question": "Which?"}},
 		},
+		Questions: testQuestions(),
+		Resolved:  make(chan struct{}),
 	}
-	e.interactiveMu.Lock()
-	e.interactiveStates["test:chat:user1"] = state
-	e.interactiveMu.Unlock()
 
 	// "allow" should NOT be interpreted as permission allow; should be treated as free text answer
 	handled := e.handlePendingPermission(p, &Message{
@@ -2231,84 +2218,79 @@ func (a *controllableAgent) ListSessions(_ context.Context) ([]AgentSessionInfo,
 }
 func (a *controllableAgent) Stop() error { return nil }
 
-// TestCleanupCAS_SkipsWhenStateReplaced verifies that cleanupInteractiveState
-// with an expected state pointer is a no-op when the map entry has been replaced.
-// This is the core of the /new race fix: old goroutine's cleanup must not delete
-// a replacement state created by a new turn.
+// TestCleanupCAS_SkipsWhenStateReplaced verifies that cleanupConversation
+// with an expected AgentSession is a no-op when the conversation's agent
+// session has been replaced. This is the core of the /new race fix: old
+// goroutine's cleanup must not kill a replacement session created by a new turn.
 func TestCleanupCAS_SkipsWhenStateReplaced(t *testing.T) {
 	e := newTestEngine()
 	key := "test:user1"
 
-	oldState := &interactiveState{agentSession: newControllableSession("old")}
-	newState := &interactiveState{agentSession: newControllableSession("new")}
+	oldSession := newControllableSession("old")
+	newSession := newControllableSession("new")
 
-	// Place the NEW state in the map (simulating: /new already cleaned up and
-	// a new turn created a replacement state).
-	e.interactiveMu.Lock()
-	e.interactiveStates[key] = newState
-	e.interactiveMu.Unlock()
+	// Place the NEW session in the conversation (simulating: /new already
+	// cleaned up and a new turn created a replacement session).
+	conv := e.conversations.GetOrCreate(key)
+	conv.AgentSession = newSession
 
-	// Old goroutine calls cleanup with the OLD state pointer — should be skipped.
-	e.cleanupInteractiveState(key, oldState)
+	// Old goroutine calls cleanup with the OLD session — should be skipped.
+	e.cleanupConversation(key, oldSession)
 
-	e.interactiveMu.Lock()
-	current := e.interactiveStates[key]
-	e.interactiveMu.Unlock()
+	conv.mu.Lock()
+	current := conv.AgentSession
+	conv.mu.Unlock()
 
-	if current != newState {
-		t.Fatal("CAS cleanup deleted the replacement state — race not prevented")
+	if current != newSession {
+		t.Fatal("CAS cleanup deleted the replacement session — race not prevented")
 	}
 }
 
 // TestCleanupCAS_DeletesWhenStateMatches verifies that cleanup proceeds normally
-// when the expected state matches the current map entry.
+// when the expected AgentSession matches the conversation's current agent session.
 func TestCleanupCAS_DeletesWhenStateMatches(t *testing.T) {
 	e := newTestEngine()
 	key := "test:user1"
 
-	state := &interactiveState{agentSession: newControllableSession("s1")}
+	session := newControllableSession("s1")
+	conv := e.conversations.GetOrCreate(key)
+	conv.AgentSession = session
 
-	e.interactiveMu.Lock()
-	e.interactiveStates[key] = state
-	e.interactiveMu.Unlock()
+	e.cleanupConversation(key, session)
 
-	e.cleanupInteractiveState(key, state)
-
-	e.interactiveMu.Lock()
-	current := e.interactiveStates[key]
-	e.interactiveMu.Unlock()
+	conv.mu.Lock()
+	current := conv.AgentSession
+	conv.mu.Unlock()
 
 	if current != nil {
-		t.Fatal("expected state to be deleted when expected pointer matches")
+		t.Fatal("expected agent session to be cleared when expected session matches")
 	}
 }
 
 // TestCleanupCAS_UnconditionalWithoutExpected verifies that cleanup without an
-// expected pointer always deletes (backward compat for command handlers).
+// expected session always clears (backward compat for command handlers).
 func TestCleanupCAS_UnconditionalWithoutExpected(t *testing.T) {
 	e := newTestEngine()
 	key := "test:user1"
 
-	state := &interactiveState{agentSession: newControllableSession("s1")}
+	session := newControllableSession("s1")
+	conv := e.conversations.GetOrCreate(key)
+	conv.AgentSession = session
 
-	e.interactiveMu.Lock()
-	e.interactiveStates[key] = state
-	e.interactiveMu.Unlock()
+	// No expected session — unconditional cleanup (used by /new, /switch).
+	e.cleanupConversation(key)
 
-	// No expected pointer — unconditional cleanup (used by /new, /switch).
-	e.cleanupInteractiveState(key)
-
-	e.interactiveMu.Lock()
-	current := e.interactiveStates[key]
-	e.interactiveMu.Unlock()
+	conv.mu.Lock()
+	current := conv.AgentSession
+	conv.mu.Unlock()
 
 	if current != nil {
-		t.Fatal("expected unconditional cleanup to delete state")
+		t.Fatal("expected unconditional cleanup to clear agent session")
 	}
 }
 
-// TestSessionMismatch_RecyclesStaleAgent verifies that getOrCreateInteractiveStateWith
-// detects when the running agent session ID differs from the active Session's
+// TestSessionMismatch_RecyclesStaleAgent verifies that getOrCreateConversation
+// detects when the running agent session ID differs from the conversation's
 // AgentSessionID and creates a fresh agent instead of reusing the stale one.
 func TestSessionMismatch_RecyclesStaleAgent(t *testing.T) {
 	newSess := newControllableSession("new-agent-id")
@@ -2320,23 +2302,18 @@ func TestSessionMismatch_RecyclesStaleAgent(t *testing.T) {
 
 	// Seed a live agent session with ID "old-agent-id".
 	oldSess := newControllableSession("old-agent-id")
-	e.interactiveMu.Lock()
-	e.interactiveStates[key] = &interactiveState{
-		agentSession: oldSess,
-		platform:     p,
-		replyCtx:     "ctx",
-	}
-	e.interactiveMu.Unlock()
+	conv := e.conversations.GetOrCreate(key)
+	conv.AgentSession = oldSess
+	conv.AgentSessionID = "new-agent-id"
+	conv.ReplyPlatform = p
+	conv.ReplyCtx = "ctx"
 
-	// The active Session now wants a DIFFERENT agent session ID.
-	session := &Session{AgentSessionID: "new-agent-id"}
+	conv = e.getOrCreateConversation(key, p, "ctx", nil)
 
-	state := e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil)
-
-	if state.agentSession == oldSess {
+	if conv.AgentSession == oldSess {
 		t.Fatal("expected stale agent session to be replaced")
 	}
-	if state.agentSession != newSess {
+	if conv.AgentSession != newSess {
 		t.Fatal("expected new agent session from StartSession")
 	}
 
@@ -2348,40 +2325,36 @@ func TestSessionMismatch_RecyclesStaleAgent(t *testing.T) {
 	}
 }
 
-// TestSessionMismatch_DoesNotLeakQuiet verifies that after a session mismatch,
-// the new state gets defaultQuiet instead of inheriting quiet from the stale state.
-func TestSessionMismatch_DoesNotLeakQuiet(t *testing.T) {
+// TestSessionMismatch_PreservesQuietAcrossRecycle verifies that after a session
+// mismatch, the conversation's quiet flag is preserved (since the conversation
+// context persists across session recycling).
+func TestSessionMismatch_PreservesQuietAcrossRecycle(t *testing.T) {
 	agent := &controllableAgent{nextSession: newControllableSession("new-id")}
 	p := &stubPlatformEngine{n: "test"}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
 
 	key := "test:user1"
 
-	// Seed a stale state with quiet=true.
-	e.interactiveMu.Lock()
-	e.interactiveStates[key] = &interactiveState{
-		agentSession: newControllableSession("old-id"),
-		platform:     p,
-		replyCtx:     "ctx",
-		quiet:        true,
-	}
-	e.interactiveMu.Unlock()
+	// Seed a conversation with quiet=true and a stale agent session.
+	conv := e.conversations.GetOrCreate(key)
+	conv.AgentSession = newControllableSession("old-id")
+	conv.AgentSessionID = "new-id"
+	conv.ReplyPlatform = p
+	conv.ReplyCtx = "ctx"
+	conv.Quiet = true
 
-	// Active session wants "new-id", which mismatches "old-id".
-	session := &Session{AgentSessionID: "new-id"}
+	conv = e.getOrCreateConversation(key, p, "ctx", nil)
 
-	state := e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil)
-
-	state.mu.Lock()
-	q := state.quiet
-	state.mu.Unlock()
-	if q {
-		t.Fatal("quiet leaked from stale state into replacement — ok=false fix not working")
+	conv.mu.Lock()
+	q := conv.Quiet
+	conv.mu.Unlock()
+	if !q {
+		t.Fatal("expected quiet to persist across session recycle")
 	}
 }
 
-// TestSessionMismatch_ReusesWhenIDsMatch verifies that getOrCreateInteractiveStateWith
-// returns the existing state when agent session IDs match (no unnecessary recycling).
+// TestSessionMismatch_ReusesWhenIDsMatch verifies that getOrCreateConversation
+// returns the existing conversation when agent session IDs match (no unnecessary recycling).
 func TestSessionMismatch_ReusesWhenIDsMatch(t *testing.T) {
 	agent := &controllableAgent{}
 	p := &stubPlatformEngine{n: "test"}
@@ -2390,26 +2363,24 @@ func TestSessionMismatch_ReusesWhenIDsMatch(t *testing.T) {
 	key := "test:user1"
 
 	existingSess := newControllableSession("matching-id")
-	existingState := &interactiveState{
-		agentSession: existingSess,
-		platform:     p,
-		replyCtx:     "ctx",
+	conv := e.conversations.GetOrCreate(key)
+	conv.AgentSession = existingSess
+	conv.AgentSessionID = "matching-id"
+	conv.ReplyPlatform = p
+	conv.ReplyCtx = "ctx"
+
+	result := e.getOrCreateConversation(key, p, "ctx", nil)
+	if result != conv {
+		t.Fatal("expected existing conversation to be reused when session IDs match")
 	}
-	e.interactiveMu.Lock()
-	e.interactiveStates[key] = existingState
-	e.interactiveMu.Unlock()
-
-	session := &Session{AgentSessionID: "matching-id"}
-
-	state := e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil)
-	if state != existingState {
-		t.Fatal("expected existing state to be reused when session IDs match")
+	if result.AgentSession != existingSess {
+		t.Fatal("expected existing agent session to be preserved")
 	}
 }
 
 // TestSessionIDWriteback_ImmediateAfterStartSession verifies that after
 // StartSession, the agent's CurrentSessionID is immediately written back
-// to the Session's AgentSessionID when it was previously empty.
+// to the conversation's AgentSessionID when it was previously empty.
 func TestSessionIDWriteback_ImmediateAfterStartSession(t *testing.T) {
 	sess := newControllableSession("agent-uuid-123")
 	agent := &controllableAgent{nextSession: sess}
@@ -2417,13 +2388,13 @@ func TestSessionIDWriteback_ImmediateAfterStartSession(t *testing.T) {
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
 
 	key := "test:user1"
-	session := &Session{AgentSessionID: ""} // empty — no prior binding
 
-	e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil)
+	e.getOrCreateConversation(key, p, "ctx", nil)
 
-	session.mu.Lock()
-	got := session.AgentSessionID
-	session.mu.Unlock()
+	conv := e.conversations.Get(key)
+	conv.mu.Lock()
+	got := conv.AgentSessionID
+	conv.mu.Unlock()
 
 	if got != "agent-uuid-123" {
 		t.Fatalf("AgentSessionID = %q, want %q — immediate writeback not working", got, "agent-uuid-123")
@@ -2439,13 +2410,14 @@ func TestSessionIDWriteback_DoesNotOverwriteExisting(t *testing.T) {
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
 
 	key := "test:user1"
-	session := &Session{AgentSessionID: "existing-uuid"}
+	conv := e.conversations.GetOrCreate(key)
+	conv.AgentSessionID = "existing-uuid"
 
-	e.getOrCreateInteractiveStateWith(key, p, "ctx", session, nil)
+	e.getOrCreateConversation(key, p, "ctx", nil)
 
-	session.mu.Lock()
-	got := session.AgentSessionID
-	session.mu.Unlock()
+	conv.mu.Lock()
+	got := conv.AgentSessionID
+	conv.mu.Unlock()
 
 	if got != "existing-uuid" {
 		t.Fatalf("AgentSessionID = %q, want %q — writeback should not overwrite", got, "existing-uuid")
@@ -2453,8 +2425,8 @@ func TestSessionIDWriteback_DoesNotOverwriteExisting(t *testing.T) {
 }
 
 // TestStaleGoroutineCleanup_RaceSimulation simulates the full race scenario:
-// old turn still processing → /new creates new Session → new turn starts →
-// old turn exits and calls cleanup. Verifies the new state survives.
+// old turn still processing → /new cleans up → new turn starts →
+// old turn exits and calls cleanup. Verifies the new session survives.
 func TestStaleGoroutineCleanup_RaceSimulation(t *testing.T) {
 	p := &stubPlatformEngine{n: "test"}
 	newSess := newControllableSession("new-agent")
@@ -2463,45 +2435,40 @@ func TestStaleGoroutineCleanup_RaceSimulation(t *testing.T) {
 
 	key := "test:user1"
 
-	// Step 1: Old turn created state S1 with old agent.
+	// Step 1: Old turn created a conversation with old agent.
 	oldSess := newControllableSession("old-agent")
-	oldState := &interactiveState{
-		agentSession: oldSess,
-		platform:     p,
-		replyCtx:     "ctx",
-	}
-	e.interactiveMu.Lock()
-	e.interactiveStates[key] = oldState
-	e.interactiveMu.Unlock()
+	conv := e.conversations.GetOrCreate(key)
+	conv.AgentSession = oldSess
+	conv.ReplyPlatform = p
+	conv.ReplyCtx = "ctx"
 
-	// Step 2: /new runs — unconditional cleanup deletes S1.
-	e.cleanupInteractiveState(key)
+	// Step 2: /new runs — unconditional cleanup clears runtime state.
+	e.cleanupConversation(key)
 
-	// Step 3: New turn creates Session B and calls getOrCreateInteractiveStateWith.
-	sessionB := &Session{AgentSessionID: ""}
-	newState := e.getOrCreateInteractiveStateWith(key, p, "ctx", sessionB, nil)
+	// Step 3: New turn calls getOrCreateConversation.
+	conv = e.getOrCreateConversation(key, p, "ctx", nil)
 
-	// Verify S2 is in the map.
-	e.interactiveMu.Lock()
-	current := e.interactiveStates[key]
-	e.interactiveMu.Unlock()
-	if current != newState {
-		t.Fatal("new state not in map")
+	// Verify new agent session is set.
+	conv.mu.Lock()
+	currentAgent := conv.AgentSession
+	conv.mu.Unlock()
+	if currentAgent != newSess {
+		t.Fatal("new agent session not set")
 	}
 
-	// Step 4: Old goroutine exits and calls cleanup with OLD state pointer.
-	// This simulates processInteractiveEvents channelClosed path.
-	e.cleanupInteractiveState(key, oldState)
+	// Step 4: Old goroutine exits and calls cleanup with OLD session.
+	// This simulates processConvEvents channelClosed path.
+	e.cleanupConversation(key, oldSess)
 
-	// Verify: new state must survive.
-	e.interactiveMu.Lock()
-	afterCleanup := e.interactiveStates[key]
-	e.interactiveMu.Unlock()
+	// Verify: new session must survive (CAS check).
+	conv.mu.Lock()
+	afterCleanup := conv.AgentSession
+	conv.mu.Unlock()
 
-	if afterCleanup != newState {
-		t.Fatal("stale goroutine's cleanup deleted the replacement state — CAS not working")
+	if afterCleanup != newSess {
+		t.Fatal("stale goroutine's cleanup deleted the replacement session — CAS not working")
 	}
-	if newState.agentSession.Alive() != true {
+	if !newSess.Alive() {
 		t.Fatal("replacement agent session was killed by stale cleanup")
 	}
 }

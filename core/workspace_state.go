@@ -9,7 +9,6 @@ import (
 type workspaceState struct {
 	mu           sync.Mutex
 	workspace    string
-	sessions     *SessionManager
 	agent        Agent
 	lastActivity time.Time
 }

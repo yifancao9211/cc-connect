@@ -201,6 +201,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 	}
 
 	actionVal, _ := event.Event.Action.Value["action"].(string)
+	slog.Info(p.tag()+": received card action", "action", actionVal, "name", event.Event.Action.Name, "option", event.Event.Action.Option)
 
 	// select_static callbacks put the chosen value in event.Event.Action.Option
 	if actionVal == "" && event.Event.Action.Option != "" {
@@ -209,12 +210,12 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 	if actionVal == "" {
 		switch event.Event.Action.Name {
 		case "delete_mode_submit":
-			actionVal = "act:/delete-mode form-submit"
+			actionVal = "cmd:/delete"
 		case "delete_mode_cancel":
 			actionVal = "act:/delete-mode cancel"
 		}
 	}
-	if actionVal == "act:/delete-mode form-submit" {
+	if event.Event.Action.Name == "delete_mode_submit" {
 		ids := collectDeleteModeSelectedFromFormValue(event.Event.Action.FormValue)
 		if len(ids) > 0 {
 			actionVal += " " + strings.Join(ids, ",")
@@ -234,7 +235,12 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 	if chatID == "" {
 		chatID = userID
 	}
-	sessionKey := fmt.Sprintf("%s:%s:%s", p.tag(), chatID, userID)
+	var sessionKey string
+	if p.shareSessionInChannel {
+		sessionKey = fmt.Sprintf("%s:%s", p.tag(), chatID)
+	} else {
+		sessionKey = fmt.Sprintf("%s:%s:%s", p.tag(), chatID, userID)
+	}
 
 	// nav: / act: — synchronous card update
 	if strings.HasPrefix(actionVal, "nav:") || strings.HasPrefix(actionVal, "act:") {
@@ -621,6 +627,11 @@ func (p *Platform) onMessage(event *larkim.P2MessageReceiveV1) error {
 	return nil
 }
 
+// ResolveUserName implements core.UserNameResolver.
+func (p *Platform) ResolveUserName(userID string) string {
+	return p.resolveUserName(userID)
+}
+
 // resolveUserName fetches a user's display name via the Contact API, with caching.
 func (p *Platform) resolveUserName(openID string) string {
 	if cached, ok := p.userNameCache.Load(openID); ok {
@@ -873,11 +884,12 @@ func (p *Platform) Send(ctx context.Context, rctx any, content string) error {
 	}
 
 	msgType, msgBody := buildReplyContent(content)
+	receiveIDType, receiveID := resolveReceiveID(rc.chatID)
 
 	resp, err := p.client.Im.Message.Create(ctx, larkim.NewCreateMessageReqBuilder().
-		ReceiveIdType(larkim.ReceiveIdTypeChatId).
+		ReceiveIdType(receiveIDType).
 		Body(larkim.NewCreateMessageReqBodyBuilder().
-			ReceiveId(rc.chatID).
+			ReceiveId(receiveID).
 			MsgType(msgType).
 			Content(msgBody).
 			Build()).
@@ -936,7 +948,7 @@ func (p *Platform) downloadResource(messageID, fileKey, resType string) ([]byte,
 }
 
 func detectMimeType(data []byte) string {
-	if len(data) >= 8 {
+	if len(data) >= 4 {
 		if data[0] == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G' {
 			return "image/png"
 		}
@@ -946,7 +958,7 @@ func detectMimeType(data []byte) string {
 		if string(data[:4]) == "GIF8" {
 			return "image/gif"
 		}
-		if string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+		if len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
 			return "image/webp"
 		}
 	}
@@ -1318,6 +1330,16 @@ func (p *Platform) ReconstructReplyCtx(sessionKey string) (any, error) {
 	return replyContext{chatID: parts[1]}, nil
 }
 
+// resolveReceiveID detects the ID type from the chatID value.
+// Feishu open_id starts with "ou_", chat_id starts with "oc_".
+// When the chatID is an open_id, use ReceiveIdTypeOpenId for private messaging.
+func resolveReceiveID(chatID string) (string, string) {
+	if strings.HasPrefix(chatID, "ou_") {
+		return larkim.ReceiveIdTypeOpenId, chatID
+	}
+	return larkim.ReceiveIdTypeChatId, chatID
+}
+
 // feishuPreviewHandle stores the message ID for an editable preview message.
 type feishuPreviewHandle struct {
 	messageID string
@@ -1381,10 +1403,11 @@ func (p *Platform) SendPreviewStart(ctx context.Context, rctx any, content strin
 			msgID = *resp.Data.MessageId
 		}
 	} else {
+		idType, idVal := resolveReceiveID(chatID)
 		resp, err := p.client.Im.Message.Create(ctx, larkim.NewCreateMessageReqBuilder().
-			ReceiveIdType(larkim.ReceiveIdTypeChatId).
+			ReceiveIdType(idType).
 			Body(larkim.NewCreateMessageReqBodyBuilder().
-				ReceiveId(chatID).
+				ReceiveId(idVal).
 				MsgType(larkim.MsgTypeInteractive).
 				Content(cardJSON).
 				Build()).

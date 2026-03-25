@@ -184,6 +184,9 @@ func (cs *CronScheduler) RegisterEngine(name string, e *Engine) {
 	cs.engines[name] = e
 }
 
+// RegisterApp is an alias for RegisterEngine for new code style.
+var RegisterAppCron = (*CronScheduler).RegisterEngine
+
 func (cs *CronScheduler) SetDefaultSilent(silent bool) {
 	cs.defaultSilent = silent
 }

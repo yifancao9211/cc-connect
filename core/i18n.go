@@ -332,6 +332,7 @@ const (
 	MsgDoctorRunning MsgKey = "doctor_running"
 	MsgDoctorTitle   MsgKey = "doctor_title"
 	MsgDoctorSummary MsgKey = "doctor_summary"
+	MsgDoctorTimeout MsgKey = "doctor_timeout"
 
 	MsgRestarting     MsgKey = "restarting"
 	MsgRestartSuccess MsgKey = "restart_success"
@@ -342,6 +343,31 @@ const (
 	MsgUpgradeDownloading MsgKey = "upgrade_downloading"
 	MsgUpgradeSuccess     MsgKey = "upgrade_success"
 	MsgUpgradeDevBuild    MsgKey = "upgrade_dev_build"
+
+	MsgApprovalTitle         MsgKey = "approval_title"
+	MsgApprovalUser          MsgKey = "approval_user"
+	MsgApprovalRequest       MsgKey = "approval_request"
+	MsgApprovalPlan          MsgKey = "approval_plan"
+	MsgApprovalNote          MsgKey = "approval_note"
+	MsgApprovalBtnApprove    MsgKey = "approval_btn_approve"
+	MsgApprovalBtnTrust      MsgKey = "approval_btn_trust"
+	MsgApprovalBtnReject     MsgKey = "approval_btn_reject"
+	MsgApprovalInvalidAction MsgKey = "approval_invalid_action"
+	MsgApprovalNoPermission  MsgKey = "approval_no_permission"
+	MsgApprovalWrongPhase    MsgKey = "approval_wrong_phase"
+	MsgApprovalApproved      MsgKey = "approval_approved"
+	MsgApprovalApprovedBody  MsgKey = "approval_approved_body"
+	MsgApprovalRejected      MsgKey = "approval_rejected"
+	MsgApprovalRejectedBody  MsgKey = "approval_rejected_body"
+	MsgApprovalTrusted       MsgKey = "approval_trusted"
+	MsgApprovalTrustedBody   MsgKey = "approval_trusted_body"
+	MsgApprovalDenyPlanning  MsgKey = "approval_deny_planning"
+	MsgApprovalAutoSubmitted MsgKey = "approval_auto_submitted"
+	MsgApprovalPending       MsgKey = "approval_pending"
+	MsgApprovalPendingUser   MsgKey = "approval_pending_user"
+	MsgApprovalSubmitted     MsgKey = "approval_submitted"
+	MsgApprovalNotifyOwner   MsgKey = "approval_notify_owner"
+	MsgApprovalExecuteMsg    MsgKey = "approval_execute_msg"
 
 	MsgAliasEmpty      MsgKey = "alias_empty"
 	MsgAliasListHeader MsgKey = "alias_list_header"
@@ -435,6 +461,19 @@ const (
 	MsgBuiltinCmdHelp      MsgKey = "help"
 	MsgBuiltinCmdBind      MsgKey = "bind"
 	MsgBuiltinCmdShell     MsgKey = "shell"
+	MsgBuiltinCmdAgent     MsgKey = "agent"
+
+	MsgQuickNew   MsgKey = "quick_new"
+	MsgQuickSwitch MsgKey = "quick_switch"
+	MsgQuickModel  MsgKey = "quick_model"
+	MsgQuickAgent  MsgKey = "quick_agent"
+	MsgQuickMore   MsgKey = "quick_more"
+
+	MsgAgentPoolNotAvailable MsgKey = "agent_pool_not_available"
+	MsgAgentListTitle        MsgKey = "agent_list_title"
+	MsgAgentSwitchHint       MsgKey = "agent_switch_hint"
+	MsgAgentNotFound         MsgKey = "agent_not_found"
+	MsgAgentSwitched         MsgKey = "agent_switched"
 
 	// Multi-workspace messages
 	MsgWsNotEnabled        MsgKey = "ws_not_enabled"
@@ -2122,6 +2161,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese:           "\n✅ %d 合格  ⚠️ %d 警告  ❌ %d 失敗",
 		LangSpanish:            "\n✅ %d aprobados  ⚠️ %d advertencias  ❌ %d fallidos",
 	},
+	MsgDoctorTimeout: {
+		LangEnglish:            "Diagnostic checks are taking longer than expected. Please run `/doctor` as a text command for full results.",
+		LangChinese:            "诊断检查耗时较长，请使用 `/doctor` 文本命令获取完整结果。",
+		LangTraditionalChinese: "診斷檢查耗時較長，請使用 `/doctor` 文字指令取得完整結果。",
+		LangJapanese:           "診断チェックに時間がかかっています。完全な結果は `/doctor` テキストコマンドでご確認ください。",
+		LangSpanish:            "Las comprobaciones están tardando más de lo esperado. Use `/doctor` como comando de texto para resultados completos.",
+	},
 	MsgRestarting: {
 		LangEnglish:            "🔄 Restarting cc-connect...",
 		LangChinese:            "🔄 正在重启 cc-connect...",
@@ -2197,6 +2243,105 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⚠️ 當前為開發版本，無法檢查更新。請從源碼構建或安裝正式發佈版本。",
 		LangJapanese:           "⚠️ 開発ビルドのため、バージョン確認ができません。ソースからビルドするか、リリース版をインストールしてください。",
 		LangSpanish:            "⚠️ Compilación de desarrollo — la verificación de versión no está disponible. Compile desde el código fuente o instale una versión publicada.",
+	},
+	MsgApprovalTitle: {
+		LangEnglish: "📋 Approval Request", LangChinese: "📋 审批请求", LangTraditionalChinese: "📋 審批請求",
+		LangJapanese: "📋 承認リクエスト", LangSpanish: "📋 Solicitud de aprobación",
+	},
+	MsgApprovalUser: {
+		LangEnglish: "👤 **User**: %s", LangChinese: "👤 **用户**: %s", LangTraditionalChinese: "👤 **用戶**: %s",
+		LangJapanese: "👤 **ユーザー**: %s", LangSpanish: "👤 **Usuario**: %s",
+	},
+	MsgApprovalRequest: {
+		LangEnglish: "📝 **Request**: %s", LangChinese: "📝 **需求**: %s", LangTraditionalChinese: "📝 **需求**: %s",
+		LangJapanese: "📝 **リクエスト**: %s", LangSpanish: "📝 **Solicitud**: %s",
+	},
+	MsgApprovalPlan: {
+		LangEnglish: "🤖 **Agent Plan**:\n%s", LangChinese: "🤖 **Agent 方案**:\n%s", LangTraditionalChinese: "🤖 **Agent 方案**:\n%s",
+		LangJapanese: "🤖 **Agent プラン**:\n%s", LangSpanish: "🤖 **Plan del agente**:\n%s",
+	},
+	MsgApprovalNote: {
+		LangEnglish: "Click to review", LangChinese: "点击按钮审批", LangTraditionalChinese: "點擊按鈕審批",
+		LangJapanese: "ボタンをクリックして審査", LangSpanish: "Haga clic para revisar",
+	},
+	MsgApprovalBtnApprove: {
+		LangEnglish: "✅ Approve", LangChinese: "✅ 批准", LangTraditionalChinese: "✅ 批准",
+		LangJapanese: "✅ 承認", LangSpanish: "✅ Aprobar",
+	},
+	MsgApprovalBtnTrust: {
+		LangEnglish: "🔓 Trust Session", LangChinese: "🔓 信任本会话", LangTraditionalChinese: "🔓 信任本會話",
+		LangJapanese: "🔓 セッション信頼", LangSpanish: "🔓 Confiar sesión",
+	},
+	MsgApprovalBtnReject: {
+		LangEnglish: "❌ Reject", LangChinese: "❌ 拒绝", LangTraditionalChinese: "❌ 拒絕",
+		LangJapanese: "❌ 拒否", LangSpanish: "❌ Rechazar",
+	},
+	MsgApprovalInvalidAction: {
+		LangEnglish: "Invalid approval action.", LangChinese: "审批操作参数无效。", LangTraditionalChinese: "審批操作參數無效。",
+		LangJapanese: "無効な承認操作です。", LangSpanish: "Acción de aprobación inválida.",
+	},
+	MsgApprovalNoPermission: {
+		LangEnglish: "Only admins can approve.", LangChinese: "只有管理员可以审批。", LangTraditionalChinese: "只有管理員可以審批。",
+		LangJapanese: "管理者のみが承認できます。", LangSpanish: "Solo los administradores pueden aprobar.",
+	},
+	MsgApprovalWrongPhase: {
+		LangEnglish: "Request is not in a reviewable state (may have been processed).", LangChinese: "该请求当前状态不可操作（可能已被处理）。", LangTraditionalChinese: "該請求當前狀態不可操作（可能已被處理）。",
+		LangJapanese: "リクエストはレビュー可能な状態ではありません（処理済みの可能性）。", LangSpanish: "La solicitud no está en estado revisable (puede haber sido procesada).",
+	},
+	MsgApprovalApproved: {
+		LangEnglish: "✅ Approved", LangChinese: "✅ 已批准", LangTraditionalChinese: "✅ 已批准",
+		LangJapanese: "✅ 承認済み", LangSpanish: "✅ Aprobado",
+	},
+	MsgApprovalApprovedBody: {
+		LangEnglish: "Admin approved. Agent is executing.", LangChinese: "管理员已批准该方案，Agent 开始执行。", LangTraditionalChinese: "管理員已批准該方案，Agent 開始執行。",
+		LangJapanese: "管理者が承認しました。Agent が実行中です。", LangSpanish: "Administrador aprobó. El agente está ejecutando.",
+	},
+	MsgApprovalRejected: {
+		LangEnglish: "❌ Rejected", LangChinese: "❌ 已拒绝", LangTraditionalChinese: "❌ 已拒絕",
+		LangJapanese: "❌ 拒否済み", LangSpanish: "❌ Rechazado",
+	},
+	MsgApprovalRejectedBody: {
+		LangEnglish: "Admin rejected the plan.", LangChinese: "管理员已拒绝该方案。", LangTraditionalChinese: "管理員已拒絕該方案。",
+		LangJapanese: "管理者がプランを拒否しました。", LangSpanish: "El administrador rechazó el plan.",
+	},
+	MsgApprovalTrusted: {
+		LangEnglish: "🔓 Trusted", LangChinese: "🔓 已信任本会话", LangTraditionalChinese: "🔓 已信任本會話",
+		LangJapanese: "🔓 セッション信頼済み", LangSpanish: "🔓 Sesión confiable",
+	},
+	MsgApprovalTrustedBody: {
+		LangEnglish: "Admin trusted this session. All subsequent operations are auto-approved.", LangChinese: "管理员已信任本会话，后续操作将自动批准。", LangTraditionalChinese: "管理員已信任本會話，後續操作將自動批准。",
+		LangJapanese: "管理者がこのセッションを信頼しました。以降の操作は自動承認されます。", LangSpanish: "El administrador confía en esta sesión. Las operaciones posteriores se aprueban automáticamente.",
+	},
+	MsgApprovalDenyPlanning: {
+		LangEnglish: "Write operations are not allowed in planning phase. Please call submit-plan to submit your plan first.", LangChinese: "规划阶段不允许写操作，请先调用 submit-plan 提交方案。", LangTraditionalChinese: "規劃階段不允許寫操作，請先調用 submit-plan 提交方案。",
+		LangJapanese: "計画段階では書き込み操作は許可されていません。先にsubmit-planを呼び出してプランを提出してください。", LangSpanish: "Las operaciones de escritura no están permitidas en la fase de planificación. Llame a submit-plan primero.",
+	},
+	MsgApprovalAutoSubmitted: {
+		LangEnglish: "⏳ Plan auto-submitted for approval, waiting for admin review.", LangChinese: "⏳ 方案已自动提交审批，等待管理员审核。", LangTraditionalChinese: "⏳ 方案已自動提交審批，等待管理員審核。",
+		LangJapanese: "⏳ プランが自動的に承認依頼されました。管理者の審査をお待ちください。", LangSpanish: "⏳ Plan enviado automáticamente para aprobación.",
+	},
+	MsgApprovalPending: {
+		LangEnglish: "⏳ Plan is under review, please wait for admin approval.", LangChinese: "⏳ 方案正在审批中，请等待管理员审核。", LangTraditionalChinese: "⏳ 方案正在審批中，請等待管理員審核。",
+		LangJapanese: "⏳ プランは審査中です。管理者の承認をお待ちください。", LangSpanish: "⏳ El plan está en revisión.",
+	},
+	MsgApprovalPendingUser: {
+		LangEnglish: "⏳ Your plan is waiting for admin approval. Please use the approval card buttons to approve or reject.\nThe approval card has been re-sent to the admin.",
+		LangChinese: "⏳ 方案正在等待管理员审批，请通过审批卡片上的按钮操作（而非发送文字消息）。\n审批卡片已重新推送给管理员。",
+		LangTraditionalChinese: "⏳ 方案正在等待管理員審批，請通過審批卡片上的按鈕操作（而非發送文字訊息）。\n審批卡片已重新推送給管理員。",
+		LangJapanese: "⏳ プランは管理者の承認を待っています。承認カードのボタンを使用してください。\n承認カードが管理者に再送されました。",
+		LangSpanish: "⏳ Tu plan está esperando la aprobación del administrador. Usa los botones de la tarjeta de aprobación.\nLa tarjeta se ha reenviado al administrador.",
+	},
+	MsgApprovalSubmitted: {
+		LangEnglish: "⏳ Plan submitted for approval, waiting for admin review.", LangChinese: "⏳ 方案已提交审批，等待管理员审核。", LangTraditionalChinese: "⏳ 方案已提交審批，等待管理員審核。",
+		LangJapanese: "⏳ プランが承認依頼されました。管理者の審査をお待ちください。", LangSpanish: "⏳ Plan enviado para aprobación.",
+	},
+	MsgApprovalNotifyOwner: {
+		LangEnglish: "✅ Admin approved your plan, Agent is executing.", LangChinese: "✅ 管理员已批准你的方案，Agent 开始执行。", LangTraditionalChinese: "✅ 管理員已批准你的方案，Agent 開始執行。",
+		LangJapanese: "✅ 管理者があなたのプランを承認しました。Agent が実行中です。", LangSpanish: "✅ El administrador aprobó tu plan, el agente está ejecutando.",
+	},
+	MsgApprovalExecuteMsg: {
+		LangEnglish: "Your plan has been approved by admin. Please execute the plan you made earlier. All file operation permissions are granted.", LangChinese: "方案已被管理员批准。请现在开始执行你之前制定的方案。所有文件操作权限已开放。", LangTraditionalChinese: "方案已被管理員批准。請現在開始執行你之前制定的方案。所有文件操作權限已開放。",
+		LangJapanese: "プランが管理者に承認されました。以前に作成したプランを実行してください。すべてのファイル操作権限が付与されています。", LangSpanish: "El plan ha sido aprobado por el administrador. Ejecute el plan que elaboró anteriormente.",
 	},
 	MsgAliasEmpty: {
 		LangEnglish:            "No aliases configured. Use `/alias add <trigger> <command>` to create one.",
@@ -2762,6 +2907,68 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "執行 Shell 命令，參數: <命令>",
 		LangJapanese:           "シェルコマンドを実行、引数: <コマンド>",
 		LangSpanish:            "Ejecutar un comando shell, arg: <comando>",
+	},
+	MsgBuiltinCmdAgent: {
+		LangEnglish:            "Switch agent backend, arg: [name]",
+		LangChinese:            "切换 Agent 引擎，参数: [名称]",
+		LangTraditionalChinese: "切換 Agent 引擎，參數: [名稱]",
+		LangJapanese:           "エージェントバックエンドを切替、引数: [名前]",
+		LangSpanish:            "Cambiar agente, arg: [nombre]",
+	},
+	MsgQuickNew: {
+		LangEnglish: "New",
+		LangChinese: "新建",
+	},
+	MsgQuickSwitch: {
+		LangEnglish: "Switch",
+		LangChinese: "切换",
+	},
+	MsgQuickModel: {
+		LangEnglish: "Model",
+		LangChinese: "模型",
+	},
+	MsgQuickAgent: {
+		LangEnglish: "Agent",
+		LangChinese: "引擎",
+	},
+	MsgQuickMore: {
+		LangEnglish: "More",
+		LangChinese: "更多",
+	},
+	MsgAgentPoolNotAvailable: {
+		LangEnglish:            "Agent pool is not configured. Only one agent is available.",
+		LangChinese:            "未配置多引擎池，当前仅有单一引擎可用。",
+		LangTraditionalChinese: "未配置多引擎池，當前僅有單一引擎可用。",
+		LangJapanese:           "エージェントプールが設定されていません。利用可能なエージェントは1つだけです。",
+		LangSpanish:            "No se configuró un pool de agentes. Solo hay un agente disponible.",
+	},
+	MsgAgentListTitle: {
+		LangEnglish:            "🤖 **Available Agents**",
+		LangChinese:            "🤖 **可用引擎**",
+		LangTraditionalChinese: "🤖 **可用引擎**",
+		LangJapanese:           "🤖 **利用可能なエージェント**",
+		LangSpanish:            "🤖 **Agentes disponibles**",
+	},
+	MsgAgentSwitchHint: {
+		LangEnglish:            "Use `/agent <name>` to switch.",
+		LangChinese:            "使用 `/agent <名称>` 切换引擎。",
+		LangTraditionalChinese: "使用 `/agent <名稱>` 切換引擎。",
+		LangJapanese:           "`/agent <名前>` でエージェントを切り替え。",
+		LangSpanish:            "Usa `/agent <nombre>` para cambiar.",
+	},
+	MsgAgentNotFound: {
+		LangEnglish:            "Agent not found: `%s`",
+		LangChinese:            "未找到引擎: `%s`",
+		LangTraditionalChinese: "未找到引擎: `%s`",
+		LangJapanese:           "エージェントが見つかりません: `%s`",
+		LangSpanish:            "Agente no encontrado: `%s`",
+	},
+	MsgAgentSwitched: {
+		LangEnglish:            "✅ Switched to agent: **%s**",
+		LangChinese:            "✅ 已切换至引擎: **%s**",
+		LangTraditionalChinese: "✅ 已切換至引擎: **%s**",
+		LangJapanese:           "✅ エージェントを切り替えました: **%s**",
+		LangSpanish:            "✅ Cambiado al agente: **%s**",
 	},
 
 	// Multi-workspace messages

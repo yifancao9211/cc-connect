@@ -47,6 +47,9 @@ func (rm *RelayManager) RegisterEngine(name string, e *Engine) {
 	rm.engines[name] = e
 }
 
+// RegisterApp is an alias for RegisterEngine for new code style.
+var RegisterAppRelay = (*RelayManager).RegisterEngine
+
 // Bind establishes a relay binding between bots in a group chat.
 // If a binding already exists, it will be replaced.
 func (rm *RelayManager) Bind(platform, chatID string, bots map[string]string) {
@@ -266,12 +269,11 @@ func truncateRelay(s string, maxLen int) string {
 }
 
 func parseSessionKeyParts(sessionKey string) (platform, chatID string, err error) {
-	// Format: "platform:chatID:userID"
-	parts := strings.SplitN(sessionKey, ":", 3)
-	if len(parts) < 2 {
+	sk := ParseSessionKey(sessionKey)
+	if sk.ChatID == "" {
 		return "", "", fmt.Errorf("invalid session key format: %q", sessionKey)
 	}
-	return parts[0], parts[1], nil
+	return sk.Platform, sk.ChatID, nil
 }
 
 // ── Persistence ─────────────────────────────────────────────

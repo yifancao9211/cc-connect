@@ -24,6 +24,12 @@ type ReplyContextReconstructor interface {
 	ReconstructReplyCtx(sessionKey string) (any, error)
 }
 
+// UserNameResolver is an optional interface for platforms that can
+// resolve a user ID to a display name (e.g. Feishu open_id → real name).
+type UserNameResolver interface {
+	ResolveUserName(userID string) string
+}
+
 // SessionEnvInjector is an optional interface for agents that accept
 // per-session environment variables (e.g. CC_PROJECT, CC_SESSION_KEY).
 type SessionEnvInjector interface {
@@ -66,6 +72,17 @@ This sends a message to the target bot and waits for its response (printed to st
 The conversation is visible in the group chat and each bot maintains its own relay session.
 
 Environment variables CC_PROJECT and CC_SESSION_KEY are already set, so the relay knows which group chat to use.
+
+### Plan approval (if enabled)
+When admin approval is required, you MUST follow this workflow before modifying any files:
+1. Analyze the user's request (you may read files, search code, etc.)
+2. Create a clear execution plan
+3. Submit the plan for approval by running:
+   cc-connect submit-plan "Your plan summary here"
+4. Wait for the system to notify you that the plan has been approved
+5. Only after receiving approval, start executing the plan
+
+If you try to modify files before approval, the operation will be blocked.
 `
 }
 
@@ -120,6 +137,16 @@ type CardNavigationHandler func(action string, sessionKey string) *Card
 // card navigation (updating the existing card instead of sending a new message).
 type CardNavigable interface {
 	SetCardNavigationHandler(h CardNavigationHandler)
+}
+
+// CardActionResult describes what the platform should do after a card action
+// is processed by the core engine. This decouples business logic (perm, askq)
+// from platform-specific rendering.
+type CardActionResult struct {
+	// Card, if non-nil, replaces the original card in-place.
+	Card *Card
+	// Message, if non-nil, is dispatched as a new user message asynchronously.
+	Message *Message
 }
 
 // MessageHandler is called by platforms when a new message arrives.

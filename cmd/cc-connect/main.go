@@ -49,6 +49,9 @@ func main() {
 		case "send":
 			runSend(os.Args[2:])
 			return
+		case "submit-plan":
+			runSubmitPlan(os.Args[2:])
+			return
 		case "cron":
 			runCron(os.Args[2:])
 			return
@@ -117,7 +120,7 @@ func main() {
 
 	setupLogger(cfg.Log.Level, logWriter)
 
-	engines := make([]*core.Engine, 0, len(cfg.Projects))
+	apps := make([]*core.App, 0, len(cfg.Projects))
 
 	for _, proj := range cfg.Projects {
 		agent, err := core.CreateAgent(proj.Agent.Type, proj.Agent.Options)
@@ -175,7 +178,7 @@ func main() {
 			lang = core.LangAuto // auto-detect
 		}
 
-		engine := core.NewEngine(proj.Name, agent, platforms, sessionFile, lang)
+		app := core.NewApp(proj.Name, agent, platforms, sessionFile, lang)
 
 		// Wire multi-workspace mode
 		if proj.Mode == "multi-workspace" {
@@ -189,46 +192,46 @@ func main() {
 				continue
 			}
 			bindingStore := filepath.Join(cfg.DataDir, "workspace_bindings.json")
-			engine.SetMultiWorkspace(baseDir, bindingStore)
+			app.SetMultiWorkspace(baseDir, bindingStore)
 			slog.Info("multi-workspace mode enabled", "project", proj.Name, "base_dir", baseDir)
 		}
 
 		// Wire global custom commands
 		for _, c := range cfg.Commands {
-			engine.AddCommand(c.Name, c.Description, c.Prompt, c.Exec, c.WorkDir, "config")
+			app.AddCommand(c.Name, c.Description, c.Prompt, c.Exec, c.WorkDir, "config")
 		}
 
 		// Wire command persistence callbacks
-		engine.SetCommandSaveAddFunc(func(name, description, prompt, exec, workDir string) error {
+		app.SetCommandSaveAddFunc(func(name, description, prompt, exec, workDir string) error {
 			return config.AddCommand(config.CommandConfig{Name: name, Description: description, Prompt: prompt, Exec: exec, WorkDir: workDir})
 		})
-		engine.SetCommandSaveDelFunc(func(name string) error {
+		app.SetCommandSaveDelFunc(func(name string) error {
 			return config.RemoveCommand(name)
 		})
 
 		// Wire global aliases
 		for _, a := range cfg.Aliases {
-			engine.AddAlias(a.Name, a.Command)
+			app.AddAlias(a.Name, a.Command)
 		}
-		engine.SetAliasSaveAddFunc(func(name, command string) error {
+		app.SetAliasSaveAddFunc(func(name, command string) error {
 			return config.AddAlias(config.AliasConfig{Name: name, Command: command})
 		})
-		engine.SetAliasSaveDelFunc(func(name string) error {
+		app.SetAliasSaveDelFunc(func(name string) error {
 			return config.RemoveAlias(name)
 		})
 
 		// Wire banned words
 		if len(cfg.BannedWords) > 0 {
-			engine.SetBannedWords(cfg.BannedWords)
+			app.SetBannedWords(cfg.BannedWords)
 		}
 
 		// Wire disabled commands (project-level)
 		if len(proj.DisabledCommands) > 0 {
-			engine.SetDisabledCommands(proj.DisabledCommands)
+			app.SetDisabledCommands(proj.DisabledCommands)
 		}
 
 		// Wire admin allowlist for privileged commands
-		engine.SetAdminFrom(proj.AdminFrom)
+		app.SetAdminFrom(proj.AdminFrom)
 
 		// Wire display truncation settings
 		{
@@ -242,7 +245,7 @@ func main() {
 			if cfg.Display.ToolMaxLen != nil {
 				dcfg.ToolMaxLen = *cfg.Display.ToolMaxLen
 			}
-			engine.SetDisplayConfig(dcfg)
+			app.SetDisplayConfig(dcfg)
 		}
 
 		// Wire streaming preview
@@ -263,7 +266,7 @@ func main() {
 			if cfg.StreamPreview.DisabledPlatforms != nil {
 				spcfg.DisabledPlatforms = cfg.StreamPreview.DisabledPlatforms
 			}
-			engine.SetStreamPreviewCfg(spcfg)
+			app.SetStreamPreviewCfg(spcfg)
 		}
 
 		// Wire rate limiting
@@ -277,13 +280,13 @@ func main() {
 				windowSecs = *cfg.RateLimit.WindowSecs
 			}
 			if maxMsg > 0 {
-				engine.SetRateLimitCfg(core.RateLimitCfg{
+				app.SetRateLimitCfg(core.RateLimitCfg{
 					MaxMessages: maxMsg,
 					Window:      time.Duration(windowSecs) * time.Second,
 				})
 			}
 		}
-		engine.SetDisplaySaveFunc(func(thinkingMaxLen, toolMaxLen *int) error {
+		app.SetDisplaySaveFunc(func(thinkingMaxLen, toolMaxLen *int) error {
 			return config.SaveDisplayConfig(thinkingMaxLen, toolMaxLen)
 		})
 
@@ -291,22 +294,22 @@ func main() {
 		if cfg.IdleTimeoutMins != nil {
 			mins := *cfg.IdleTimeoutMins
 			if mins <= 0 {
-				engine.SetEventIdleTimeout(0)
+				app.SetEventIdleTimeout(0)
 			} else {
-				engine.SetEventIdleTimeout(time.Duration(mins) * time.Minute)
+				app.SetEventIdleTimeout(time.Duration(mins) * time.Minute)
 			}
 		}
 
 		// Wire default quiet mode: project-level overrides global
 		if proj.Quiet != nil {
-			engine.SetDefaultQuiet(*proj.Quiet)
+			app.SetDefaultQuiet(*proj.Quiet)
 		} else if cfg.Quiet != nil {
-			engine.SetDefaultQuiet(*cfg.Quiet)
+			app.SetDefaultQuiet(*cfg.Quiet)
 		}
 
 		// Wire sender injection
 		if proj.InjectSender != nil {
-			engine.SetInjectSender(*proj.InjectSender)
+			app.SetInjectSender(*proj.InjectSender)
 		}
 
 		// Wire speech-to-text if enabled
@@ -347,7 +350,7 @@ func main() {
 				}
 			}
 			if speechCfg.STT != nil {
-				engine.SetSpeechConfig(speechCfg)
+				app.SetSpeechConfig(speechCfg)
 				slog.Info("speech: enabled", "provider", cfg.Speech.Provider)
 			}
 		}
@@ -392,8 +395,8 @@ func main() {
 				}
 			}
 			if ttsCfg.TTS != nil {
-				engine.SetTTSConfig(ttsCfg)
-				engine.SetTTSSaveFunc(func(mode string) error {
+				app.SetTTSConfig(ttsCfg)
+				app.SetTTSSaveFunc(func(mode string) error {
 					return config.SaveTTSMode(mode)
 				})
 				slog.Info("tts: enabled", "provider", ttsCfg.Provider, "voice", ttsCfg.Voice, "mode", initMode)
@@ -402,34 +405,34 @@ func main() {
 
 		// Set up save callback for auto-detected language
 		if lang == core.LangAuto {
-			engine.SetLanguageSaveFunc(func(l core.Language) error {
+			app.SetLanguageSaveFunc(func(l core.Language) error {
 				return config.SaveLanguage(string(l))
 			})
 		}
 
 		// Set up save callbacks for provider management
 		projName := proj.Name
-		engine.SetProviderSaveFunc(func(providerName string) error {
+		app.SetProviderSaveFunc(func(providerName string) error {
 			return config.SaveActiveProvider(projName, providerName)
 		})
-		engine.SetProviderAddSaveFunc(func(p core.ProviderConfig) error {
+		app.SetProviderAddSaveFunc(func(p core.ProviderConfig) error {
 			return config.AddProviderToConfig(projName, config.ProviderConfig{
 				Name: p.Name, APIKey: p.APIKey, BaseURL: p.BaseURL,
 				Model: p.Model, Thinking: p.Thinking, Env: p.Env,
 			})
 		})
-		engine.SetProviderRemoveSaveFunc(func(name string) error {
+		app.SetProviderRemoveSaveFunc(func(name string) error {
 			return config.RemoveProviderFromConfig(projName, name)
 		})
 
 		// Wire config reload
-		capturedEngine := engine
+		capturedApp := app
 		capturedProjName := projName
-		engine.SetConfigReloadFunc(func() (*core.ConfigReloadResult, error) {
-			return reloadConfig(configPath, capturedProjName, capturedEngine)
+		app.SetConfigReloadFunc(func() (*core.ConfigReloadResult, error) {
+			return reloadConfig(configPath, capturedProjName, capturedApp)
 		})
 
-		engines = append(engines, engine)
+		apps = append(apps, app)
 	}
 
 	// Start cron scheduler
@@ -443,22 +446,22 @@ func main() {
 		if cfg.Cron.Silent != nil && *cfg.Cron.Silent {
 			cronSched.SetDefaultSilent(true)
 		}
-		for i, e := range engines {
-			cronSched.RegisterEngine(cfg.Projects[i].Name, e)
-			e.SetCronScheduler(cronSched)
+		for i, a := range apps {
+			cronSched.RegisterEngine(cfg.Projects[i].Name, a)
+			a.SetCronScheduler(cronSched)
 		}
 	}
 
 	var startErrors []error
-	for _, e := range engines {
-		if err := e.Start(); err != nil {
-			slog.Warn("engine start partially failed (some platforms may be unavailable)", "error", err)
+	for _, a := range apps {
+		if err := a.Start(); err != nil {
+			slog.Warn("app start partially failed (some platforms may be unavailable)", "error", err)
 			startErrors = append(startErrors, err)
 		}
 	}
 	// Only exit if ALL engines failed to start
-	if len(startErrors) > 0 && len(startErrors) == len(engines) {
-		slog.Error("all engines failed to start, exiting")
+	if len(startErrors) > 0 && len(startErrors) == len(apps) {
+		slog.Error("all apps failed to start, exiting")
 		os.Exit(1)
 	}
 
@@ -475,9 +478,9 @@ func main() {
 	} else {
 		relayMgr := core.NewRelayManager(cfg.DataDir)
 		apiSrv.SetRelayManager(relayMgr)
-		for i, e := range engines {
-			apiSrv.RegisterEngine(cfg.Projects[i].Name, e)
-			e.SetRelayManager(relayMgr)
+		for i, a := range apps {
+			apiSrv.RegisterEngine(cfg.Projects[i].Name, a)
+			a.SetRelayManager(relayMgr)
 		}
 		if cronSched != nil {
 			apiSrv.SetCronScheduler(cronSched)
@@ -485,13 +488,13 @@ func main() {
 		apiSrv.Start()
 	}
 
-	slog.Info("cc-connect is running", "projects", len(engines))
+	slog.Info("cc-connect is running", "projects", len(apps))
 
 	// After startup, check if we were restarted and send success notification
 	if notify := core.ConsumeRestartNotify(cfg.DataDir); notify != nil {
 		slog.Info("post-restart: sending success notification", "platform", notify.Platform, "session", notify.SessionKey)
-		for _, e := range engines {
-			e.SendRestartNotification(notify.Platform, notify.SessionKey)
+		for _, a := range apps {
+			a.SendRestartNotification(notify.Platform, notify.SessionKey)
 		}
 	}
 
@@ -513,8 +516,8 @@ func main() {
 	if apiSrv != nil {
 		apiSrv.Stop()
 	}
-	for _, e := range engines {
-		if err := e.Stop(); err != nil {
+	for _, a := range apps {
+		if err := a.Stop(); err != nil {
 			slog.Error("shutdown error", "error", err)
 		}
 	}
@@ -728,7 +731,7 @@ func setupLogger(level string, w io.Writer) {
 
 // reloadConfig re-reads config.toml and applies hot-reloadable settings
 // (display, providers, commands) to the given engine.
-func reloadConfig(configPath, projName string, engine *core.Engine) (*core.ConfigReloadResult, error) {
+func reloadConfig(configPath, projName string, app *core.App) (*core.ConfigReloadResult, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("reload config: %w", err)
@@ -756,23 +759,23 @@ func reloadConfig(configPath, projName string, engine *core.Engine) (*core.Confi
 	if cfg.Display.ToolMaxLen != nil {
 		dcfg.ToolMaxLen = *cfg.Display.ToolMaxLen
 	}
-	engine.SetDisplayConfig(dcfg)
+	app.SetDisplayConfig(dcfg)
 	result.DisplayUpdated = true
 
 	// Reload default quiet mode
 	if proj.Quiet != nil {
-		engine.SetDefaultQuiet(*proj.Quiet)
+		app.SetDefaultQuiet(*proj.Quiet)
 	} else if cfg.Quiet != nil {
-		engine.SetDefaultQuiet(*cfg.Quiet)
+		app.SetDefaultQuiet(*cfg.Quiet)
 	} else {
-		engine.SetDefaultQuiet(false)
+		app.SetDefaultQuiet(false)
 	}
 
 	// Reload sender injection
-	engine.SetInjectSender(proj.InjectSender != nil && *proj.InjectSender)
+	app.SetInjectSender(proj.InjectSender != nil && *proj.InjectSender)
 
 	// Reload providers
-	if ps, ok := engine.GetAgent().(core.ProviderSwitcher); ok {
+	if ps, ok := app.GetAgent().(core.ProviderSwitcher); ok {
 		providers := make([]core.ProviderConfig, len(proj.Agent.Providers))
 		for i, p := range proj.Agent.Providers {
 			providers[i] = core.ProviderConfig{
@@ -789,26 +792,26 @@ func reloadConfig(configPath, projName string, engine *core.Engine) (*core.Confi
 	}
 
 	// Reload custom commands
-	engine.ClearCommands("config")
+	app.ClearCommands("config")
 	for _, c := range cfg.Commands {
-		engine.AddCommand(c.Name, c.Description, c.Prompt, c.Exec, c.WorkDir, "config")
+		app.AddCommand(c.Name, c.Description, c.Prompt, c.Exec, c.WorkDir, "config")
 	}
 	result.CommandsUpdated = len(cfg.Commands)
 
 	// Reload aliases
-	engine.ClearAliases()
+	app.ClearAliases()
 	for _, a := range cfg.Aliases {
-		engine.AddAlias(a.Name, a.Command)
+		app.AddAlias(a.Name, a.Command)
 	}
 
 	// Reload banned words
-	engine.SetBannedWords(cfg.BannedWords)
+	app.SetBannedWords(cfg.BannedWords)
 
 	// Reload disabled commands
-	engine.SetDisabledCommands(proj.DisabledCommands)
+	app.SetDisabledCommands(proj.DisabledCommands)
 
 	// Reload admin allowlist
-	engine.SetAdminFrom(proj.AdminFrom)
+	app.SetAdminFrom(proj.AdminFrom)
 
 	slog.Info("config reloaded", "project", projName)
 	return result, nil
